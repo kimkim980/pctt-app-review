@@ -1,0 +1,25 @@
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local config / Secrets
+.env
+.env.local
+
+# Output / Sessions data
+output/
+sessions/
+.cache/
+
+# Executables and builds
+dist/
+build/
+*.exe
+*.spec
