@@ -137,18 +137,17 @@ Chỉ trả về JSON hợp lệ, không thêm lời dẫn ngoài JSON.
 """
 
 
-def _call_openai_compatible(provider: str, model: str, user_prompt: str, timeout_seconds: int) -> dict:
+def _call_openai_compatible(provider: str, model: str, user_prompt: str, timeout_seconds: int, api_key: str | None = None, base_url: str | None = None) -> dict:
     preset = PROVIDER_PRESETS.get(provider, PROVIDER_PRESETS["openai"])
-    base_url = os.getenv("AI_BASE_URL") or preset.get("base_url")
+    base_url = base_url or os.getenv("AI_BASE_URL") or preset.get("base_url")
     api_key_env = preset.get("api_key_env", "OPENAI_API_KEY")
-    api_key = os.getenv("AI_API_KEY") or os.getenv(api_key_env)
+    api_key = api_key or os.getenv("AI_API_KEY") or os.getenv(api_key_env)
 
     if not api_key:
         if provider in {"ollama", "lmstudio"}:
             api_key = "local"
         else:
             return None
-
 
     kwargs = {"api_key": api_key, "timeout": timeout_seconds}
     if base_url:
@@ -185,8 +184,8 @@ def _call_openai_compatible(provider: str, model: str, user_prompt: str, timeout
     return _extract_json(content)
 
 
-def _call_gemini(model: str, user_prompt: str, timeout_seconds: int) -> dict | None:
-    api_key = os.getenv("AI_API_KEY") or os.getenv("GEMINI_API_KEY")
+def _call_gemini(model: str, user_prompt: str, timeout_seconds: int, api_key: str | None = None) -> dict | None:
+    api_key = api_key or os.getenv("AI_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
         return None
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
@@ -210,7 +209,7 @@ def _call_gemini(model: str, user_prompt: str, timeout_seconds: int) -> dict | N
     return _extract_json(text)
 
 
-def analyze_with_gpt(markdown_input: str, rules_markdown: str, deterministic_result: dict, model: str | None = None, provider: str | None = None) -> dict | None:
+def analyze_with_gpt(markdown_input: str, rules_markdown: str, deterministic_result: dict, model: str | None = None, provider: str | None = None, api_key: str | None = None, base_url: str | None = None) -> dict | None:
     provider = _clean_provider(provider)
     if _env_bool("OFFLINE_MODE") or provider == "offline":
         return None
@@ -219,9 +218,10 @@ def analyze_with_gpt(markdown_input: str, rules_markdown: str, deterministic_res
     user_prompt = _build_user_prompt(markdown_input, rules_markdown, deterministic_result)
 
     if provider == "gemini":
-        return _call_gemini(model, user_prompt, timeout_seconds)
+        return _call_gemini(model, user_prompt, timeout_seconds, api_key=api_key)
     if provider in PROVIDER_PRESETS:
-        return _call_openai_compatible(provider, model, user_prompt, timeout_seconds)
+        return _call_openai_compatible(provider, model, user_prompt, timeout_seconds, api_key=api_key, base_url=base_url)
+
 
     raise ValueError(f"AI_PROVIDER không hỗ trợ: {provider}")
 
