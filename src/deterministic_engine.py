@@ -263,16 +263,28 @@ def _requirement_lines(definition: str) -> list[str]:
     return lines[:10]
 
 
+_GLOBAL_TEXT_CACHE = {}
+
+def _get_global_text_folded(blocks: list[dict]) -> str:
+    key = id(blocks)
+    if key not in _GLOBAL_TEXT_CACHE:
+        _GLOBAL_TEXT_CACHE[key] = " ".join(b.get("folded_text") or _fold_text(b.get("text", "")) for b in blocks)
+    return _GLOBAL_TEXT_CACHE[key]
+
+
 def _find_best_block(blocks: list[dict], query: str) -> tuple[dict | None, int]:
     q = _fold_text(query)
     if not q or not blocks:
         return None, 0
     best, best_score = None, 0
+    terms = _important_terms(query)
     for b in blocks:
-        t = _fold_text(b.get("text", ""))
+        t = b.get("folded_text")
+        if t is None:
+            t = _fold_text(b.get("text", ""))
+            b["folded_text"] = t
         score = fuzz.partial_ratio(q, t)
         # Boost/penalize by concrete domain term overlap so generic headings like "PHƯƠNG ÁN" do not pass every rule.
-        terms = _important_terms(query)
         if terms:
             hit = sum(1 for term in terms if term in t)
             term_score = int(hit / max(len(terms), 1) * 100)
@@ -283,6 +295,7 @@ def _find_best_block(blocks: list[dict], query: str) -> tuple[dict | None, int]:
         if score > best_score:
             best, best_score = b, int(score)
     return best, best_score
+
 
 
 def _nearby_text(blocks: list[dict], best: dict | None, window: int = 8) -> str:
@@ -493,7 +506,7 @@ def _input_text_blocks(paths: list[str]) -> list[dict]:
         elif suffix in {".xlsx", ".xls", ".csv"}:
             if suffix == ".csv":
                 try:
-                    df = pd.read_csv(p, dtype=str).fillna("")
+                    df = pd.read_csv(p, dtype=str, nrows=200).fillna("")
                     blocks = []
                     for i, row in df.iterrows():
                         vals = [f"{c}: {row.get(c, '')}" for c in df.columns if str(row.get(c, '')).strip()]
@@ -502,15 +515,18 @@ def _input_text_blocks(paths: list[str]) -> list[dict]:
                 except Exception:
                     blocks = []
             else:
-                blocks = _read_excel_blocks(str(p), max_rows_per_sheet=None)
+                blocks = _read_excel_blocks(str(p), max_rows_per_sheet=200)
         else:
             blocks = []
         for b in blocks:
             b["file"] = p.name
             if "sheet" not in b:
                 b["sheet"] = b.get("kind", "TEXT")
+            # Pre-calculate folded_text to speed up calculations.
+            b["folded_text"] = _fold_text(b.get("text", ""))
         all_blocks.extend(blocks)
     return all_blocks
+
 
 
 def _split_rule_text_to_items(text: str, source_file: str, source_sheet: str = "TEXT", base_row: str = "") -> list[dict]:
@@ -644,8 +660,14 @@ def _coverage_against_blocks(blocks: list[dict], rule_text: str, best: dict | No
     terms = _important_terms(rule_text)
     if not terms:
         return 0.0, [], []
-    nearby = _fold_text(_nearby_text(blocks, best, window=10))
-    global_text = _fold_text("\n".join(b.get("text", "") for b in blocks))
+    global_text = _get_global_text_folded(blocks)
+    if not best or best not in blocks:
+        nearby = global_text
+    else:
+        idx = blocks.index(best)
+        lo = max(0, idx - 10)
+        hi = min(len(blocks), idx + 10 + 1)
+        nearby = " ".join(b.get("folded_text") or _fold_text(b.get("text", "")) for b in blocks[lo:hi])
     hit = []
     missing = []
     for t in terms:
@@ -656,13 +678,16 @@ def _coverage_against_blocks(blocks: list[dict], rule_text: str, best: dict | No
     return len(hit) / max(len(terms), 1), hit, missing
 
 
+
 def analyze_text_rule_files(input_paths: list[str], rule_files: list[str]) -> dict:
     """Evaluate every imported rule file against every imported thuyet-minh/phuong-an/CSDL file.
 
     Each meaningful row/line in each rule file becomes one checklist item. The output records the
     best matching evidence block and its position. This works offline and does not depend on GPT.
     """
+    _GLOBAL_TEXT_CACHE.clear()
     blocks = _input_text_blocks(input_paths)
+
     checks: list[CheckItem] = []
     all_rules = []
     for rf in rule_files or []:

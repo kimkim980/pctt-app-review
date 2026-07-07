@@ -141,10 +141,14 @@ def _call_openai_compatible(provider: str, model: str, user_prompt: str, timeout
     preset = PROVIDER_PRESETS.get(provider, PROVIDER_PRESETS["openai"])
     base_url = os.getenv("AI_BASE_URL") or preset.get("base_url")
     api_key_env = preset.get("api_key_env", "OPENAI_API_KEY")
-    api_key = os.getenv("AI_API_KEY") or os.getenv(api_key_env) or "local"
+    api_key = os.getenv("AI_API_KEY") or os.getenv(api_key_env)
 
-    if provider in {"openai", "groq", "openrouter"} and not api_key:
-        return None
+    if not api_key:
+        if provider in {"ollama", "lmstudio"}:
+            api_key = "local"
+        else:
+            return None
+
 
     kwargs = {"api_key": api_key, "timeout": timeout_seconds}
     if base_url:
